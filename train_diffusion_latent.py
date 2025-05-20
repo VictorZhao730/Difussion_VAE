@@ -5,7 +5,7 @@ from utils.data import load_data, get_loader
 from utils.train import train_diffusion
 
 LEARNING_RATE=1e-3
-EPOCHS=5
+EPOCHS=50
 BATCH_SIZE=64
 DATA_DIR='dataset/iclr_final_truncated_fixed_powers.h5'
 SEED=42

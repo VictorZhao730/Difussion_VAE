@@ -1,25 +1,44 @@
 from models.vae import VAE, vae_loss
+import matplotlib.pyplot as plt
 import torch
+import os
 
-def train_one_epoch(model, loader, optimizer, device):
-    model.train()
-    total_loss = 0
-    for batch in loader:
-        x = batch[0].to(device)
-        optimizer.zero_grad()
-        recon_x, mu, logvar = model(x)
-        loss = vae_loss(recon_x, x, mu, logvar)
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item() * x.size(0)
-    return total_loss / len(loader.dataset)
+def train_vae(model, loader, optimizer, device, epochs=10):
+    loss_history = []
+    for epoch in range(epochs):
+        train_loss = None
+        model.train()
+        total_loss = 0
+        for batch in loader:
+            x = batch[0].to(device)
+            optimizer.zero_grad()
+            recon_x, mu, logvar = model(x)
+            loss = vae_loss(recon_x, x, mu, logvar)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item() * x.size(0)
+        train_loss = total_loss / len(loader.dataset)
+        loss_history.append(train_loss)
+        print(f"[VAE] Epoch {epoch+1}: Train {train_loss:.4f}")
+
+    plt.figure()
+    plt.plot(range(1, epochs + 1), loss_history, label="VAE Training Loss")
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    plt.title("Training Loss Curve for Variational Autoencoder")
+    plt.legend()
+    plt.grid()
+    os.makedirs('./plots', exist_ok=True)
+    plt.savefig("./plots/vae_loss_curve.png") 
+    plt.close()
 
 
-def train_diffusion(diff_model, diffusion, z_data, epochs=10, batch_size=128, lr=1e-3):
-
+def train_diffusion(diff_model, diffusion, z_data, epochs=10, batch_size=64, lr=1e-3):
     loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(z_data), batch_size=batch_size, shuffle=True)
     optimizer = torch.optim.Adam(diff_model.parameters(), lr=lr)
     device = next(diff_model.parameters()).device
+
+    loss_history = []
 
     for epoch in range(epochs):
         diff_model.train()
@@ -35,15 +54,30 @@ def train_diffusion(diff_model, diffusion, z_data, epochs=10, batch_size=128, lr
             loss.backward()
             optimizer.step()
             total_loss += loss.item() * z0.size(0)
-        print(f"[Diffusion] Epoch {epoch+1}, Loss: {total_loss/len(z_data):.4f}")
+        
+        avg_loss = total_loss / len(z_data)
+        loss_history.append(avg_loss)
+        print(f"[Diffusion] Epoch {epoch+1}, Loss: {avg_loss:.4f}")
 
-        import torch
+    plt.figure()
+    plt.plot(range(1, epochs + 1), loss_history, label="Diffusion on Latent Training Loss")
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    plt.title("Training Loss Curve for Diffusion on Latent Model")
+    plt.legend()
+    plt.grid()
+    os.makedirs('./plots', exist_ok=True)
+    plt.savefig("./plots/diffusion_latent_loss_curve.png") 
+    plt.close()
 
-def train_prior(diff_model, diffusion, z_data, cond_data, epochs=10, batch_size=128, lr=1e-3):
+
+def train_prior(diff_model, diffusion, z_data, cond_data, epochs=10, batch_size=64, lr=1e-3):
     dataset = torch.utils.data.TensorDataset(z_data, cond_data)
     loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
     optimizer = torch.optim.Adam(diff_model.parameters(), lr=lr)
     device = next(diff_model.parameters()).device
+
+    loss_history = []
 
     for epoch in range(epochs):
         diff_model.train()
@@ -60,4 +94,18 @@ def train_prior(diff_model, diffusion, z_data, cond_data, epochs=10, batch_size=
             loss.backward()
             optimizer.step()
             total_loss += loss.item() * z0.size(0)
-        print(f"[DiffusionPrior] Epoch {epoch+1}, Loss: {total_loss/len(z_data):.4f}")
+        
+        avg_loss = total_loss / len(z_data)
+        loss_history.append(avg_loss)
+        print(f"[DiffusionPrior] Epoch {epoch+1}, Loss: {avg_loss:.4f}")
+
+    plt.figure()
+    plt.plot(range(1, epochs + 1), loss_history, label="Diffusion Prior Training Loss")
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    plt.title("Training Loss Curve for Diffusion Prior Model")
+    plt.legend()
+    plt.grid()
+    os.makedirs('./plots', exist_ok=True)
+    plt.savefig("./plots/diffusion_prior_loss_curve.png")
+    plt.close()
