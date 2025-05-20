@@ -62,7 +62,7 @@ All models are evaluated based on reconstruction MSE.
 - **Main dataset**: `dataset/iclr_final_truncated_fixed_powers.h5`
 - **Conditional information**: `dataset/tsoulos_dataset_1.csv`
     - The `type` and `part` columns are concatenated to form the condition input for the Diffusion Prior model.
-
+- **Download**: Down load the main dataset from `Release` and place it under `./dataset/`
 ---
 
 ## Training and Evaluation
