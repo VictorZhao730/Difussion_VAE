@@ -98,18 +98,11 @@ Each model has independent training and evaluation routines:
       ```
 
 3. **Evaluate Models**
-    - Evaluate VAE:  
+    - Evaluate:  
       ```bash
-      python evaluate_vae.py
+      python evaluate.py
       ```
-    - Evaluate Latent Diffusion:  
-      ```bash
-      python evaluate_diffusion_latent.py
-      ```
-    - Evaluate Diffusion Prior:  
-      ```bash
-      python evaluate_diffusion_prior.py
-      ```
+
 
 4. **Results**  
    The reconstruction MSE for each model will be printed in the terminal.
