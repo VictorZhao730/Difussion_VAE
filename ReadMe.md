@@ -121,12 +121,5 @@ Each model has independent training and evaluation routines:
 
 ## Citation
 
-If this project is useful for your research, please consider citing it.
+For any questions or suggestions, feel free to open issues or PRs.
 
----
-
-For any questions or suggestions, feel free to open an issue or pull request!
-
----
-
-If you need further customization or more technical details, let me know!
