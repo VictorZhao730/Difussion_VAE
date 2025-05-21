@@ -11,7 +11,7 @@ def train_vae(model, loader, optimizer, device, epochs=10):
         train_loss = None
         model.train()
         total_loss = 0
-        for batch in loader:
+        for batch in tqdm(loader, desc=f"Epoch {epoch+1}/{epochs}"):
             x = batch[0].to(device)
             optimizer.zero_grad()
             recon_x, mu, logvar = model(x)
@@ -83,7 +83,7 @@ def train_diffusion(diff_model, diffusion, z_data, epochs=10, batch_size=64, lr=
     for epoch in range(epochs):
         diff_model.train()
         total_loss = 0
-        for batch in loader:
+        for batch in tqdm(loader, desc=f"Epoch {epoch+1}/{epochs}"):
             z0 = batch[0].to(device)  # original z
             t = diffusion.sample_timesteps(z0.size(0)) 
             noise = torch.randn_like(z0)
@@ -122,7 +122,7 @@ def train_prior(diff_model, diffusion, z_data, cond_data, epochs=10, batch_size=
     for epoch in range(epochs):
         diff_model.train()
         total_loss = 0
-        for z0, cond in loader:
+        for z0, cond in tqdm(loader, desc=f"Epoch {epoch+1}/{epochs}"):
             z0 = z0.to(device)
             cond = cond.to(device)
             t = diffusion.sample_timesteps(z0.size(0)) 
