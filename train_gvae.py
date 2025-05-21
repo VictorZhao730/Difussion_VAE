@@ -6,7 +6,7 @@ from dataset.grammar_alltogether import GCFG
 import os
 from nltk import CFG
 
-LEARNING_RATE=1e-3
+LEARNING_RATE=5e-3
 EPOCHS=5
 BATCH_SIZE=256
 DATA_DIR='dataset/iclr_final_truncated_fixed_powers.h5'   
