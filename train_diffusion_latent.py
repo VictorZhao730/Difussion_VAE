@@ -3,6 +3,7 @@ from models.vae import VAE
 from models.diffusion_latent import SimpleMLPUNet, LatentDiffusion
 from utils.data import load_data, get_loader
 from utils.train import train_diffusion
+import os
 
 LEARNING_RATE=1e-3
 EPOCHS=50
@@ -31,4 +32,6 @@ train_z = torch.cat(all_z, dim=0)
 diff_model = SimpleMLPUNet(latent_dim=train_z.size(-1)).to(device)
 diffusion = LatentDiffusion(latent_dim=train_z.size(-1), timesteps=1000, device=device)
 train_diffusion(diff_model, diffusion, train_z, epochs=EPOCHS, batch_size=BATCH_SIZE, lr=LEARNING_RATE)
-torch.save(diff_model.state_dict(), "best_diffusion_latent.pth")
+
+os.makedirs('./trained_models', exist_ok=True)
+torch.save(diff_model.state_dict(), "./trained_models/best_diffusion_latent.pth")
