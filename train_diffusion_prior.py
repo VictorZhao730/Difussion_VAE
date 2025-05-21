@@ -4,6 +4,7 @@ from models.vae import VAE
 from models.diffusion_prior import DiffusionPriorNet, DiffusionPrior
 from utils.data import load_cond, load_cond_data, get_cond_loader
 from utils.train import train_prior
+import os
 
 LEARNING_RATE = 1e-3
 EPOCHS = 50
@@ -34,7 +35,7 @@ with torch.no_grad():
 train_z = torch.cat(all_z, dim=0)       # (N, latent_dim)
 train_cond = torch.cat(all_cond, dim=0) # (N, cond_dim)
 
-# 4. 训练Diffusion Prior
+# train Diffusion Prior
 COND_DIM = train_cond.size(-1)
 LATENT_DIM = train_z.size(-1)
 TIMESTEPS = 1000
@@ -44,4 +45,5 @@ prior = DiffusionPrior(latent_dim=LATENT_DIM, timesteps=TIMESTEPS, device=device
 optimizer = Adam(prior_net.parameters(), lr=LEARNING_RATE)
 
 train_prior(prior_net, prior, train_z, train_cond, epochs=EPOCHS, batch_size=BATCH_SIZE, lr=LEARNING_RATE)
-torch.save(prior_net.state_dict(), "best_diffusion_prior.pth")
+os.makedirs('./trained_models', exist_ok=True)
+torch.save(prior_net.state_dict(), "./trained_models/best_diffusion_prior.pth")

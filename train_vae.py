@@ -2,6 +2,7 @@ import torch
 from models.vae import VAE, vae_loss
 from utils.data import load_data, get_loader
 from utils.train import train_vae
+import os
 
 LEARNING_RATE=1e-3
 EPOCHS=50
@@ -18,4 +19,5 @@ optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
 train_vae(model, train_loader, optimizer, device, epochs=EPOCHS)
 
-torch.save(model.state_dict(), "best_vae.pth")
+os.makedirs('./trained_models', exist_ok=True)
+torch.save(model.state_dict(), "./trained_models/best_vae.pth")
