@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# --------- 语法Mask函数 ---------
 class MaskFn:
     def __init__(self, productions, start_symbol):
         """
@@ -14,11 +13,9 @@ class MaskFn:
         self.idx2prod = {i: p for i, p in enumerate(self.productions)}
 
     def init_stack(self, batch_size=1):
-        # 返回batch个初始栈
         return [[self.start_symbol] for _ in range(batch_size)]
 
     def get_mask(self, stack):
-        # stack: 当前语法栈（list），返回长度为num_productions的mask
         mask = torch.full((len(self.productions),), float('-inf'))
         if not stack:
             return mask
@@ -29,10 +26,8 @@ class MaskFn:
         return mask
 
     def update_stack(self, stack, prod_idx):
-        # prod_idx: int，产生式编号
         prod = self.idx2prod[prod_idx]
-        stack = stack[:-1]  # 弹出栈顶
-        # 产生式右部逆序入栈（只入非终结符）
+        stack = stack[:-1] 
         for symbol in reversed(prod.rhs()):
             if hasattr(symbol, 'symbol'):  # nltk.Nonterminal
                 stack.append(symbol)
@@ -69,34 +64,32 @@ class GDecoder(nn.Module):
     def forward(self, z, start_token, batch_stacks=None):
         """
         z: (batch, latent_dim)
-        start_token: (rule_dim,) one-hot，起始输入（通常是第一个产生式one-hot）
-        batch_stacks: list of stacks，长度等于batch
+        start_token: (rule_dim,) one-hot
+        batch_stacks: list of stacks
         """
         batch = z.size(0)
         h = self.fc(z).unsqueeze(0)  # (1, batch, hidden_dim)
         inputs = start_token.unsqueeze(0).repeat(batch, 1).unsqueeze(1)  # (batch, 1, rule_dim)
         outputs = []
-        # 初始化语法栈
         stacks = batch_stacks if batch_stacks is not None else self.mask_fn.init_stack(batch)
         for t in range(self.seq_len):
             out, h = self.gru(inputs, h)  # out: (batch, 1, hidden_dim)
             logits = self.out(out.squeeze(1))  # (batch, rule_dim)
-            # mask每个样本的logits
+            masked_logits = []
             for i in range(batch):
                 mask = self.mask_fn.get_mask(stacks[i]).to(self.device)
-                logits[i] = logits[i] + mask
+                masked_logit = logits[i] + mask
+                masked_logit = torch.clamp(masked_logit, min=-10, max=10) # clip
+                masked_logits.append(masked_logit)
+            logits = torch.stack(masked_logits, dim=0)
             outputs.append(logits)
-            # 采样/贪婪选取下一个产生式
             next_tokens = torch.argmax(logits, dim=1)
-            # 更新stack
             for i in range(batch):
                 stacks[i] = self.mask_fn.update_stack(stacks[i], next_tokens[i].item())
-            # 准备下一个输入
             inputs = F.one_hot(next_tokens, num_classes=self.rule_dim).float().unsqueeze(1)
         # (batch, seq_len, rule_dim)
         return torch.stack(outputs, dim=1)
 
-# --------- GVAE ---------
 class GVAE(nn.Module):
     def __init__(self, seq_len=30, rule_dim=53, hidden_dim=200, latent_dim=200, mask_fn=None, device='cpu'):
         super(GVAE, self).__init__()
@@ -115,9 +108,8 @@ class GVAE(nn.Module):
         recon_logits = self.decoder(z, start_token, batch_stacks)
         return recon_logits, mu, logvar
 
-# --------- 损失函数 ---------
 def gvae_loss(recon_logits, target, mu, logvar, weight=0.5):
-    # recon_logits: (batch, seq_len, rule_dim)，未经过softmax
+    # recon_logits: (batch, seq_len, rule_dim)
     # target: (batch, seq_len, rule_dim) one-hot
     recon_logits = recon_logits.view(-1, recon_logits.size(-1))
     target = target.view(-1, target.size(-1))
@@ -125,27 +117,3 @@ def gvae_loss(recon_logits, target, mu, logvar, weight=0.5):
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
     return (BCE + weight * KLD) / target.size(0)
 
-# --------- 用法说明 ---------
-
-"""
-# 你需要先准备CFG文法和productions，例如：
-from nltk import CFG
-grammar = '''
-S -> S '+' T | T
-T -> 'x' | '(' S ')'
-'''
-GCFG = CFG.fromstring(grammar)
-productions = GCFG.productions()
-start_symbol = GCFG.start()
-mask_fn = MaskFn(productions, start_symbol)
-
-# 初始化模型
-gvae = GVAE(seq_len=30, rule_dim=len(productions), hidden_dim=200, latent_dim=200, mask_fn=mask_fn, device='cuda')
-
-# 输入数据准备
-# x: (batch, seq_len, rule_dim) one-hot产生式序列
-# start_token: (rule_dim,) one-hot，通常是第一个产生式
-# target: (batch, seq_len, rule_dim) one-hot
-# 训练循环同VAE，只是输入和loss略有不同
-
-"""
