@@ -1,0 +1,17 @@
+# Dataset files
+dataset/iclr_final_truncated_fixed_powers.h5
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# IDE files
+.vscode/
+.idea/
+
