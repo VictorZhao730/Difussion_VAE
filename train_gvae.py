@@ -7,7 +7,7 @@ import os
 from nltk import CFG
 
 LEARNING_RATE=5e-3
-EPOCHS=5
+EPOCHS=50
 BATCH_SIZE=256
 DATA_DIR='dataset/iclr_final_truncated_fixed_powers.h5'   
 SEED = 42
@@ -36,4 +36,4 @@ start_token[0] = 1
 train_gvae(model, train_loader, optimizer, device, start_token, epochs=EPOCHS)
 
 os.makedirs('./trained_models', exist_ok=True)
-torch.save(model.state_dict(), "best_gvae.pth")
+torch.save(model.state_dict(), "./trained_models/best_gvae.pth")

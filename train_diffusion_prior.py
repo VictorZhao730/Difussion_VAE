@@ -1,20 +1,24 @@
 import torch
 from torch.optim import Adam
-from models.vae import VAE
+from models.gvae import GVAE
 from models.diffusion_prior import DiffusionPriorNet, DiffusionPrior
 from utils.data import load_cond, load_cond_data, get_cond_loader
 from utils.train import train_prior
 import os
+from dataset.grammar_alltogether import GCFG
 
 LEARNING_RATE = 1e-3
 EPOCHS = 50
-BATCH_SIZE = 64
+BATCH_SIZE = 128
 DATA_DIR = 'dataset/iclr_final_truncated_fixed_powers.h5'
 CSV_PATH = 'dataset/tsoulos_dataset_1.csv'
 SEED = 42
 
-model = VAE(seq_len=72, feature_dim=53)
-model.load_state_dict(torch.load("best_vae.pth"))
+productions = GCFG.productions()
+
+
+model = GVAE(seq_len=72, rule_dim=len(productions))
+model.load_state_dict(torch.load("./trained_models/best_gvae.pth", weights_only=True))
 model.eval()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = model.to(device)

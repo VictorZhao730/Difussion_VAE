@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class SimpleMLPUNet(nn.Module):
-    def __init__(self, latent_dim, time_emb_dim=32):
+    def __init__(self, latent_dim=200, time_emb_dim=32):
         super().__init__()
         self.time_mlp = nn.Sequential(
             nn.Linear(1, time_emb_dim),
