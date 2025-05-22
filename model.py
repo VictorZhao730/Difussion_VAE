@@ -5,39 +5,40 @@ import torch.nn.functional as F
 
 
 class Decoder(nn.Module):
-    def __init__(self, input_size=200, hidden_n=200, output_feature_size=12, max_seq_length=15):
+    def __init__(self, input_size=200, hidden_n=200, output_size=53, seq_length=72):
         super(Decoder, self).__init__()
-        self.max_seq_length = max_seq_length
+        self.seq_length = seq_length
         self.hidden_n = hidden_n
-        self.output_feature_size = output_feature_size
+        self.output_size = output_size
+        
         self.batch_norm = nn.BatchNorm1d(input_size)
         self.fc_input = nn.Linear(input_size, hidden_n)
-        # we specify each layer manually, so that we can do teacher forcing on the last layer.
-        # we also use no drop-out in this version.
-        self.gru_1 = nn.GRU(input_size=input_size, hidden_size=hidden_n, batch_first=True)
-        self.gru_2 = nn.GRU(input_size=input_size, hidden_size=hidden_n, batch_first=True)
-        self.gru_3 = nn.GRU(input_size=input_size, hidden_size=hidden_n, batch_first=True)
-        self.fc_out = nn.Linear(hidden_n, output_feature_size)
+        
+        self.gru_1 = nn.GRU(input_size=hidden_n, hidden_size=hidden_n, batch_first=True)
+        self.gru_2 = nn.GRU(input_size=hidden_n, hidden_size=hidden_n, batch_first=True)
+        self.gru_3 = nn.GRU(input_size=hidden_n, hidden_size=hidden_n, batch_first=True)
+        self.fc_out = nn.Linear(hidden_n, output_size)
 
     def forward(self, encoded, hidden_1, hidden_2, hidden_3, beta=0.3, target_seq=None):
-        _batch_size = encoded.size()[0]
+        batch_size = encoded.size()[0]
 
         embedded = F.relu(self.fc_input(self.batch_norm(encoded))) \
-            .view(_batch_size, 1, -1) \
-            .repeat(1, self.max_seq_length, 1)
-        # batch_size, seq_length, hidden_size; batch_size, hidden_size
+            .view(batch_size, 1, -1) \
+            .repeat(1, self.seq_length, 1)
+
         out_1, hidden_1 = self.gru_1(embedded, hidden_1)
         out_2, hidden_2 = self.gru_2(out_1, hidden_2)
-        # NOTE: need to combine the input from previous layer with the expected output during training.
-        if self.training and target_seq:
+        
+        if self.training and target_seq is not None:
             out_2 = out_2 * (1 - beta) + target_seq * beta
+            
         out_3, hidden_3 = self.gru_3(out_2, hidden_3)
-        out = self.fc_out(out_3.contiguous().view(-1, self.hidden_n)).view(_batch_size, self.max_seq_length,
-                                                                           self.output_feature_size)
-        return F.relu(F.sigmoid(out)), hidden_1, hidden_2, hidden_3
+        out = self.fc_out(out_3.contiguous().view(-1, self.hidden_n)) \
+            .view(batch_size, self.seq_length, self.output_size)
+            
+        return F.sigmoid(out), hidden_1, hidden_2, hidden_3
 
     def init_hidden(self, batch_size):
-        # NOTE: assume only 1 layer no bi-direction
         h1 = Variable(torch.zeros(1, batch_size, self.hidden_n), requires_grad=False)
         h2 = Variable(torch.zeros(1, batch_size, self.hidden_n), requires_grad=False)
         h3 = Variable(torch.zeros(1, batch_size, self.hidden_n), requires_grad=False)
@@ -45,33 +46,37 @@ class Decoder(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, L, k1=2, k2=3, k3=4, hidden_n=200):
+    def __init__(self, input_channels=53, hidden_n=200):
         super(Encoder, self).__init__()
-        # NOTE: GVAE implementation does not use max-pooling. Original DCNN implementation uses max-k pooling.
-        self.conv_1 = nn.Conv1d(in_channels=12, out_channels=12, kernel_size=k1, groups=12)
-        self.bn_1 = nn.BatchNorm1d(12)
-        self.conv_2 = nn.Conv1d(in_channels=12, out_channels=12, kernel_size=k2, groups=12)
-        self.bn_2 = nn.BatchNorm1d(12)
-        self.conv_3 = nn.Conv1d(in_channels=12, out_channels=12, kernel_size=k3, groups=12)
-        self.bn_3 = nn.BatchNorm1d(12)
+        # Adjust input channels to match the data shape
+        self.conv_1 = nn.Conv1d(in_channels=input_channels, out_channels=64, kernel_size=3)
+        self.bn_1 = nn.BatchNorm1d(64)
+        self.conv_2 = nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3)
+        self.bn_2 = nn.BatchNorm1d(128)
+        self.conv_3 = nn.Conv1d(in_channels=128, out_channels=256, kernel_size=3)
+        self.bn_3 = nn.BatchNorm1d(256)
 
-        # todo: harded coded because I can LOL
-        self.fc_0 = nn.Linear(12 * 9, hidden_n)
+        # Calculate the size after convolutions
+        # Input shape: (batch_size, 53, 72)
+        # After conv1: (batch_size, 64, 70)
+        # After conv2: (batch_size, 128, 68)
+        # After conv3: (batch_size, 256, 66)
+        self.fc_0 = nn.Linear(256 * 66, hidden_n)
         self.fc_mu = nn.Linear(hidden_n, hidden_n)
         self.fc_var = nn.Linear(hidden_n, hidden_n)
 
     def forward(self, x):
-        batch_size = x.size()[0]
+        # Input shape: (batch_size, 72, 53)
+        # Transpose to (batch_size, 53, 72) for conv1d
         x = x.transpose(1, 2).contiguous()
+        
         x = F.relu(self.bn_1(self.conv_1(x)))
         x = F.relu(self.bn_2(self.conv_2(x)))
         x = F.relu(self.bn_3(self.conv_3(x)))
-        x_ = x.view(batch_size, -1)
-        h = self.fc_0(x_)
+        
+        x = x.view(x.size(0), -1)  # Flatten
+        h = self.fc_0(x)
         return self.fc_mu(h), self.fc_var(h)
-
-
-from visdom_helper.visdom_helper import Dashboard
 
 
 class VAELoss(nn.Module):
@@ -79,9 +84,7 @@ class VAELoss(nn.Module):
         super(VAELoss, self).__init__()
         self.bce_loss = nn.BCELoss()
         self.bce_loss.size_average = False
-        self.dashboard = Dashboard('Variational-Autoencoder-experiment')
 
-    # question: how is the loss function using the mu and variance?
     def forward(self, x, mu, log_var, recon_x):
         """gives the batch normalized Variational Error."""
 
@@ -101,7 +104,7 @@ class VAELoss(nn.Module):
 class GrammarVariationalAutoEncoder(nn.Module):
     def __init__(self):
         super(GrammarVariationalAutoEncoder, self).__init__()
-        self.encoder = Encoder(15)
+        self.encoder = Encoder()
         self.decoder = Decoder()
 
     def forward(self, x):
