@@ -13,7 +13,7 @@ BATCH_SIZE=128
 DATA_DIR='dataset/iclr_final_truncated_fixed_powers.h5'
 SEED=42
 
-model = GVAE(seq_len=72, input_feature_size=12)
+model = GVAE(seq_len=72, input_feature_size=53)
 model.load_state_dict(torch.load("trained_models/best_gvae.pth", weights_only=True))
 model.eval()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
