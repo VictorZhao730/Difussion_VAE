@@ -1,18 +1,22 @@
 import torch
-from models.vae import VAE
+from models.gvae import GVAE, MaskFn
 from models.diffusion_latent import SimpleMLPUNet, LatentDiffusion
 from utils.data import load_data, get_loader
 from utils.train import train_diffusion
 import os
+from dataset.grammar_alltogether import GCFG
+
 
 LEARNING_RATE=1e-3
 EPOCHS=50
-BATCH_SIZE=64
+BATCH_SIZE=128
 DATA_DIR='dataset/iclr_final_truncated_fixed_powers.h5'
 SEED=42
 
-model = VAE(seq_len=72, feature_dim=53)
-model.load_state_dict(torch.load("best_vae.pth"))
+productions = GCFG.productions()
+
+model = GVAE(seq_len=72, rule_dim=len(productions))
+model.load_state_dict(torch.load("trained_models/best_gvae.pth", weights_only=True))
 model.eval()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = model.to(device)

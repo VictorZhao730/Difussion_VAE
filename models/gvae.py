@@ -33,7 +33,6 @@ class MaskFn:
                 stack.append(symbol)
         return stack
 
-# --------- Encoder ---------
 class GEncoder(nn.Module):
     def __init__(self, seq_len=30, rule_dim=53, hidden_dim=200, latent_dim=200):
         super(GEncoder, self).__init__()
@@ -91,7 +90,7 @@ class GDecoder(nn.Module):
         return torch.stack(outputs, dim=1)
 
 class GVAE(nn.Module):
-    def __init__(self, seq_len=30, rule_dim=53, hidden_dim=200, latent_dim=200, mask_fn=None, device='cpu'):
+    def __init__(self, seq_len=72, rule_dim=53, hidden_dim=200, latent_dim=200, mask_fn=None, device='cpu'):
         super(GVAE, self).__init__()
         self.encoder = GEncoder(seq_len, rule_dim, hidden_dim, latent_dim)
         self.decoder = GDecoder(seq_len, rule_dim, hidden_dim, latent_dim, mask_fn, device)

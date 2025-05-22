@@ -10,7 +10,7 @@ class DiffusionPriorNet(nn.Module):
             nn.Linear(time_emb_dim, time_emb_dim)
         )
         self.net = nn.Sequential(
-            nn.Linear(latent_dim + cond_dim + time_emb_dim, 128),  # 修正这里
+            nn.Linear(latent_dim + cond_dim + time_emb_dim, 128), 
             nn.ReLU(),
             nn.Linear(128, latent_dim)
         )
