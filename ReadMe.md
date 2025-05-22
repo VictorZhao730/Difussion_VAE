@@ -84,9 +84,9 @@ Each model has independent training and evaluation routines:
    Place the dataset and CSV condition file in the `dataset/` directory.
 
 2. **Train Models**
-    - Train VAE:  
+    - Train GVAE:  
       ```bash
-      python train_vae.py
+      python train_gvae.py
       ```
     - Train Latent Diffusion:  
       ```bash
