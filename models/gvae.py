@@ -2,117 +2,87 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class MaskFn:
-    def __init__(self, productions, start_symbol):
-        """
-        productions: list of nltk.Production
-        start_symbol: nltk.Nonterminal
-        """
-        self.productions = productions
-        self.start_symbol = start_symbol
-        self.idx2prod = {i: p for i, p in enumerate(self.productions)}
-
-    def init_stack(self, batch_size=1):
-        return [[self.start_symbol] for _ in range(batch_size)]
-
-    def get_mask(self, stack):
-        mask = torch.full((len(self.productions),), float('-inf'))
-        if not stack:
-            return mask
-        top = stack[-1]
-        for i, prod in enumerate(self.productions):
-            if prod.lhs() == top:
-                mask[i] = 0
-        return mask
-
-    def update_stack(self, stack, prod_idx):
-        prod = self.idx2prod[prod_idx]
-        stack = stack[:-1] 
-        for symbol in reversed(prod.rhs()):
-            if hasattr(symbol, 'symbol'):  # nltk.Nonterminal
-                stack.append(symbol)
-        return stack
-
-class GEncoder(nn.Module):
-    def __init__(self, seq_len=30, rule_dim=53, hidden_dim=200, latent_dim=200):
-        super(GEncoder, self).__init__()
-        self.gru = nn.GRU(input_size=rule_dim, hidden_size=hidden_dim, batch_first=True)
-        self.fc_mu = nn.Linear(hidden_dim, latent_dim)
-        self.fc_logvar = nn.Linear(hidden_dim, latent_dim)
+class ConvEncoder(nn.Module):
+    def __init__(self, input_feature_size=53, seq_len=72, hidden_n=200, k1=2, k2=3, k3=4):
+        super(ConvEncoder, self).__init__()
+        self.conv_1 = nn.Conv1d(in_channels=input_feature_size, out_channels=12, kernel_size=k1)
+        self.bn_1 = nn.BatchNorm1d(12)
+        self.conv_2 = nn.Conv1d(in_channels=12, out_channels=12, kernel_size=k2)
+        self.bn_2 = nn.BatchNorm1d(12)
+        self.conv_3 = nn.Conv1d(in_channels=12, out_channels=12, kernel_size=k3)
+        self.bn_3 = nn.BatchNorm1d(12)
+        self.fc_0 = nn.Linear(12 * (seq_len - k1 - k2 - k3 + 3), hidden_n)  # 注意这里的长度要根据卷积核计算
+        self.fc_mu = nn.Linear(hidden_n, hidden_n)
+        self.fc_var = nn.Linear(hidden_n, hidden_n)
 
     def forward(self, x):
-        # x: (batch, seq_len, rule_dim)
-        _, h = self.gru(x)  # h: (1, batch, hidden_dim)
-        h = h.squeeze(0)
-        mu = self.fc_mu(h)
-        logvar = self.fc_logvar(h)
-        return mu, logvar
+        # x: (batch, seq_len, feature_size)
+        batch_size = x.size(0)
+        x = x.transpose(1, 2).contiguous()  # (batch, feature_size, seq_len)
+        x = F.relu(self.bn_1(self.conv_1(x)))
+        x = F.relu(self.bn_2(self.conv_2(x)))
+        x = F.relu(self.bn_3(self.conv_3(x)))
+        x_ = x.view(batch_size, -1)
+        h = self.fc_0(x_)
+        return self.fc_mu(h), self.fc_var(h)
+    
+class MultiGRUDecoder(nn.Module):
+    def __init__(self, input_size=200, hidden_n=200, output_feature_size=53, max_seq_length=72):
+        super(MultiGRUDecoder, self).__init__()
+        self.max_seq_length = max_seq_length
+        self.hidden_n = hidden_n
+        self.output_feature_size = output_feature_size
+        self.batch_norm = nn.BatchNorm1d(input_size)
+        self.fc_input = nn.Linear(input_size, hidden_n)
+        self.gru_1 = nn.GRU(input_size=input_size, hidden_size=hidden_n, batch_first=True)
+        self.gru_2 = nn.GRU(input_size=input_size, hidden_size=hidden_n, batch_first=True)
+        self.gru_3 = nn.GRU(input_size=input_size, hidden_size=hidden_n, batch_first=True)
+        self.fc_out = nn.Linear(hidden_n, output_feature_size)
 
-# --------- Decoder ---------
-class GDecoder(nn.Module):
-    def __init__(self, seq_len=30, rule_dim=53, hidden_dim=200, latent_dim=200, mask_fn=None, device='cpu'):
-        super(GDecoder, self).__init__()
-        self.fc = nn.Linear(latent_dim, hidden_dim)
-        self.gru = nn.GRU(input_size=rule_dim, hidden_size=hidden_dim, batch_first=True)
-        self.out = nn.Linear(hidden_dim, rule_dim)
-        self.seq_len = seq_len
-        self.rule_dim = rule_dim
-        self.mask_fn = mask_fn
-        self.device = device
+    def forward(self, encoded, hidden_1, hidden_2, hidden_3, beta=0.3, target_seq=None):
+        _batch_size = encoded.size()[0]
+        embedded = F.relu(self.fc_input(self.batch_norm(encoded))) \
+            .view(_batch_size, 1, -1) \
+            .repeat(1, self.max_seq_length, 1)
+        out_1, hidden_1 = self.gru_1(embedded, hidden_1)
+        out_2, hidden_2 = self.gru_2(out_1, hidden_2)
+        out_3, hidden_3 = self.gru_3(out_2, hidden_3)
+        out = self.fc_out(out_3.contiguous().view(-1, self.hidden_n)).view(_batch_size, self.max_seq_length, self.output_feature_size)
+        if self.training and target_seq is not None:
+            # target_seq shape must be (batch, seq_len, output_feature_size)
+            out = out * (1 - beta) + target_seq * beta
+        return F.relu(torch.sigmoid(out)), hidden_1, hidden_2, hidden_3
 
-    def forward(self, z, start_token, batch_stacks=None):
-        """
-        z: (batch, latent_dim)
-        start_token: (rule_dim,) one-hot
-        batch_stacks: list of stacks
-        """
-        batch = z.size(0)
-        h = self.fc(z).unsqueeze(0)  # (1, batch, hidden_dim)
-        inputs = start_token.unsqueeze(0).repeat(batch, 1).unsqueeze(1)  # (batch, 1, rule_dim)
-        outputs = []
-        stacks = batch_stacks if batch_stacks is not None else self.mask_fn.init_stack(batch)
-        for t in range(self.seq_len):
-            out, h = self.gru(inputs, h)  # out: (batch, 1, hidden_dim)
-            logits = self.out(out.squeeze(1))  # (batch, rule_dim)
-            masked_logits = []
-            for i in range(batch):
-                mask = self.mask_fn.get_mask(stacks[i]).to(self.device)
-                masked_logit = logits[i] + mask
-                masked_logit = torch.clamp(masked_logit, min=-10, max=10) # clip
-                masked_logits.append(masked_logit)
-            logits = torch.stack(masked_logits, dim=0)
-            outputs.append(logits)
-            next_tokens = torch.argmax(logits, dim=1)
-            for i in range(batch):
-                stacks[i] = self.mask_fn.update_stack(stacks[i], next_tokens[i].item())
-            inputs = F.one_hot(next_tokens, num_classes=self.rule_dim).float().unsqueeze(1)
-        # (batch, seq_len, rule_dim)
-        return torch.stack(outputs, dim=1)
 
+    def init_hidden(self, batch_size, device):
+        h1 = torch.zeros(1, batch_size, self.hidden_n, device=device)
+        h2 = torch.zeros(1, batch_size, self.hidden_n, device=device)
+        h3 = torch.zeros(1, batch_size, self.hidden_n, device=device)
+        return h1, h2, h3
+    
 class GVAE(nn.Module):
-    def __init__(self, seq_len=72, rule_dim=53, hidden_dim=200, latent_dim=200, mask_fn=None, device='cpu'):
+    def __init__(self, input_feature_size=53, seq_len=15, hidden_n=200, output_feature_size=53):
         super(GVAE, self).__init__()
-        self.encoder = GEncoder(seq_len, rule_dim, hidden_dim, latent_dim)
-        self.decoder = GDecoder(seq_len, rule_dim, hidden_dim, latent_dim, mask_fn, device)
-        self.latent_dim = latent_dim
+        self.encoder = ConvEncoder(input_feature_size=input_feature_size, seq_len=seq_len, hidden_n=hidden_n)
+        self.decoder = MultiGRUDecoder(input_size=hidden_n, hidden_n=hidden_n, output_feature_size=output_feature_size, max_seq_length=seq_len)
 
-    def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5 * logvar)
+    def reparameterize(self, mu, log_var):
+        std = torch.exp(0.5 * log_var)
         eps = torch.randn_like(std)
         return mu + eps * std
 
-    def forward(self, x, start_token, batch_stacks=None):
-        mu, logvar = self.encoder(x)
-        z = self.reparameterize(mu, logvar)
-        recon_logits = self.decoder(z, start_token, batch_stacks)
-        return recon_logits, mu, logvar
+    def forward(self, x, beta=0.3, target_seq=None):
+        batch_size = x.size(0)
+        mu, log_var = self.encoder(x)
+        z = self.reparameterize(mu, log_var)
+        device = x.device
+        h1, h2, h3 = self.decoder.init_hidden(batch_size, device)
+        output, h1, h2, h3 = self.decoder(z, h1, h2, h3, beta=beta, target_seq=target_seq)
+        return output, mu, log_var
 
-def gvae_loss(recon_logits, target, mu, logvar, weight=0.5):
-    # recon_logits: (batch, seq_len, rule_dim)
-    # target: (batch, seq_len, rule_dim) one-hot
-    recon_logits = recon_logits.view(-1, recon_logits.size(-1))
-    target = target.view(-1, target.size(-1))
-    BCE = F.binary_cross_entropy_with_logits(recon_logits, target, reduction='sum')
-    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-    return (BCE + weight * KLD) / target.size(0)
+def gvae_loss(recon_x, x, mu, log_var):
+    batch_size = x.size(0)
+    BCE = F.binary_cross_entropy(recon_x, x, reduction='sum')
+    KLD = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
+    return (BCE + KLD) / batch_size
 

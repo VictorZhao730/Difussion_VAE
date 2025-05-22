@@ -34,26 +34,27 @@ def train_vae(model, loader, optimizer, device, epochs=10):
     plt.savefig("./plots/vae_loss_curve.png") 
     plt.close()
 
-def train_gvae(model, loader, optimizer, device, start_token, epochs=10, weight=0.5):
+def train_gvae(model, loader, optimizer, device, epochs=10, beta=0.3):
     """
-    model: GVAE模型
-    loader: DataLoader, 每个batch返回(batch, seq_len, rule_dim)
+    适用于新GVAE结构的训练函数
+    model: NewGVAE模型
+    loader: DataLoader, 每个batch返回(batch, seq_len, feature_dim)的tensor
     optimizer: 优化器
     device: 设备
-    start_token: (rule_dim,) one-hot, 通常是第一个产生式
     epochs: 训练轮数
-    weight: KLD损失权重
+    beta: 解码器teacher forcing权重
     """
     loss_history = []
     model.train()
     for epoch in range(epochs):
         total_loss = 0
         for batch in tqdm(loader, desc=f"Epoch {epoch+1}/{epochs}"):
-            x = batch[0].to(device)  # (batch, seq_len, rule_dim)
-            target = x  # 作为重建目标
+            # 如果你的loader返回(batch, seq_len, feature_dim)的tensor，直接用batch
+            x = batch[0].to(device)  # (batch, seq_len, feature_dim)
+            target = x  # 重建目标
             optimizer.zero_grad()
-            recon_logits, mu, logvar = model(x, start_token.to(device))
-            loss = gvae_loss(recon_logits, target, mu, logvar, weight)
+            output, mu, log_var = model(x, beta=beta, target_seq=target)
+            loss = vae_loss(output, target, mu, log_var)
             loss.backward()
             optimizer.step()
             total_loss += loss.item() * x.size(0)
@@ -65,7 +66,7 @@ def train_gvae(model, loader, optimizer, device, start_token, epochs=10, weight=
     plt.plot(range(1, epochs + 1), loss_history, label="GVAE Training Loss")
     plt.xlabel("Epochs")
     plt.ylabel("Loss")
-    plt.title("Training Loss Curve for Grammar VAE")
+    plt.title("Training Loss Curve for GVAE")
     plt.legend()
     plt.grid()
     os.makedirs('./plots', exist_ok=True)
