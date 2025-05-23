@@ -4,8 +4,8 @@ from utils.data import load_data, get_loader
 from utils.train import train_gvae      # 训练函数建议新建
 import os
 
-LEARNING_RATE = 5e-3
-EPOCHS = 120
+LEARNING_RATE = 1e-3
+EPOCHS = 200
 BATCH_SIZE = 128
 DATA_DIR = 'dataset/iclr_final_truncated_fixed_powers.h5'
 SEED = 42

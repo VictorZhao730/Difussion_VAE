@@ -1,8 +1,7 @@
 import os
 import torch
-from torch.utils.data import DataLoader
 import pandas as pd
-from models.gvae import GVAE, MaskFn
+from models.gvae import GVAE
 from utils.data import load_data, get_loader, load_cond, load_cond_data, get_cond_loader
 from models.diffusion_latent import SimpleMLPUNet, LatentDiffusion
 from models.diffusion_prior import DiffusionPriorNet
@@ -19,8 +18,10 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 productions = GCFG.productions()
-start_symbol = GCFG.start()
-mask_fn = MaskFn(productions, start_symbol)
+seq_len = 72
+input_feature_size = len(productions)   # 你的特征维度
+output_feature_size = input_feature_size
+hidden_n = 200
 
 test_data = load_data(DATA_DIR, split="test", random_seed=SEED)
 test_loader = get_loader(test_data, batch_size=BATCH_SIZE)
@@ -32,30 +33,29 @@ test_cond_loader = get_cond_loader(test_cond_data, test_cond, batch_size=BATCH_S
 df = pd.read_csv(CSV_PATH)
 original_exprs = df.loc[test_indices, 'expr'].tolist()
 
-gvae = GVAE(seq_len=72, rule_dim=len(productions), mask_fn=mask_fn, device=device).to(device)
-gvae.load_state_dict(torch.load("trained_models/best_gvae.pth", map_location=device, weights_only=True))
+# 加载GVAE
+gvae = GVAE(input_feature_size=input_feature_size, seq_len=seq_len, hidden_n=hidden_n, output_feature_size=output_feature_size).to(device)
+gvae.load_state_dict(torch.load("trained_models/best_gvae.pth", map_location=device))
 gvae.eval()
 
-diff_model = SimpleMLPUNet(latent_dim=gvae.latent_dim).to(device)
-diff_model.load_state_dict(torch.load("trained_models/best_diffusion_latent.pth", map_location=device, weights_only=True))
+# 加载Diffusion模型
+diff_model = SimpleMLPUNet(latent_dim=hidden_n).to(device)
+diff_model.load_state_dict(torch.load("trained_models/best_diffusion_latent.pth", map_location=device))
 diff_model.eval()
-diffusion = LatentDiffusion(latent_dim=gvae.latent_dim, timesteps=1000, device=device)
+diffusion = LatentDiffusion(latent_dim=hidden_n, timesteps=1000, device=device)
 
-prior_net = DiffusionPriorNet(latent_dim=gvae.latent_dim, cond_dim=test_cond.shape[-1]).to(device)
-prior_net.load_state_dict(torch.load("trained_models/best_diffusion_prior.pth", map_location=device, weights_only=True))
+prior_net = DiffusionPriorNet(latent_dim=hidden_n, cond_dim=test_cond.shape[-1]).to(device)
+prior_net.load_state_dict(torch.load("trained_models/best_diffusion_prior.pth", map_location=device))
 prior_net.eval()
 
-start_token = torch.zeros(len(productions), device=device)
-start_token[0] = 1
-
+# 加载表达式解码器
 expression_decoder = ExpressionDecoder(
     checkpoint_path="trained_models/best_gvae.pth",
     device=device,
-    model=GVAE(seq_len=72, rule_dim=len(productions), mask_fn=mask_fn, device=device,
-               latent_dim=200, hidden_dim=200),
+    model=GVAE(input_feature_size=input_feature_size, seq_len=seq_len, hidden_n=hidden_n, output_feature_size=output_feature_size),
 )
 
-# 1. GVAE
+# 1. GVAE重建
 all_mse = []
 all_exprs = []
 all_original_exprs = []
@@ -63,11 +63,10 @@ expr_idx = 0
 
 with torch.no_grad():
     for batch in test_loader:
-        x = batch[0].to(device)  # (batch, seq_len, rule_dim)
+        x = batch[0].to(device)  # (batch, seq_len, input_feature_size)
         batch_size = x.size(0)
-        batch_stacks = mask_fn.init_stack(batch_size)
-        recon_logits, mu, logvar = gvae(x, start_token, batch_stacks)
-        recon_prob = torch.softmax(recon_logits, dim=-1)
+        recon_logits, mu, logvar = gvae(x)   # 只需x
+        recon_prob = torch.sigmoid(recon_logits)  # 你的GVAE输出最后一层已是sigmoid+relu
         mse = ((recon_prob - x) ** 2).mean().item()
         all_mse.append(mse)
         for i in range(batch_size):
@@ -99,9 +98,10 @@ with torch.no_grad():
         t = diffusion.sample_timesteps(batch_size)
         z_noisy = diffusion.q_sample(z, t)
         z_pred = diffusion.p_sample(diff_model, z_noisy, t)
-        batch_stacks = mask_fn.init_stack(batch_size)
-        recon_logits = gvae.decoder(z_pred, start_token, batch_stacks)
-        recon_prob = torch.softmax(recon_logits, dim=-1)
+        # decoder需要hidden
+        h1, h2, h3 = gvae.decoder.init_hidden(batch_size, device)
+        recon_logits, _, _, _ = gvae.decoder(z_pred, h1, h2, h3)
+        recon_prob = torch.sigmoid(recon_logits)
         mse = ((recon_prob - x) ** 2).mean().item()
         all_mse.append(mse)
         for i in range(batch_size):
@@ -130,14 +130,14 @@ with torch.no_grad():
         cond = batch_cond.to(device)
         batch_size = x.size(0)
         t_prior = torch.zeros(batch_size, device=device)  # t=0
-        z_noisy = torch.zeros(batch_size, gvae.latent_dim, device=device)  # prior's input of z_noisy
+        z_noisy = torch.zeros(batch_size, hidden_n, device=device)  # prior's input of z_noisy
         z_prior = prior_net(z_noisy, cond, t_prior)
         t = diffusion.sample_timesteps(batch_size)
         z_noisy = diffusion.q_sample(z_prior, t)
         z_pred = diffusion.p_sample(diff_model, z_noisy, t)
-        batch_stacks = mask_fn.init_stack(batch_size)
-        recon_logits = gvae.decoder(z_pred, start_token, batch_stacks)
-        recon_prob = torch.softmax(recon_logits, dim=-1)
+        h1, h2, h3 = gvae.decoder.init_hidden(batch_size, device)
+        recon_logits, _, _, _ = gvae.decoder(z_pred, h1, h2, h3)
+        recon_prob = torch.sigmoid(recon_logits)
         mse = ((recon_prob - x) ** 2).mean().item()
         all_mse.append(mse)
         for i in range(batch_size):
