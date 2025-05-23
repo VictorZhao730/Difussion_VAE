@@ -35,17 +35,17 @@ original_exprs = df.loc[test_indices, 'expr'].tolist()
 
 # 加载GVAE
 gvae = GVAE(input_feature_size=input_feature_size, seq_len=seq_len, hidden_n=hidden_n, output_feature_size=output_feature_size).to(device)
-gvae.load_state_dict(torch.load("trained_models/best_gvae.pth", map_location=device))
+gvae.load_state_dict(torch.load("trained_models/best_gvae.pth", map_location=device, weights_only=True))
 gvae.eval()
 
 # 加载Diffusion模型
 diff_model = SimpleMLPUNet(latent_dim=hidden_n).to(device)
-diff_model.load_state_dict(torch.load("trained_models/best_diffusion_latent.pth", map_location=device))
+diff_model.load_state_dict(torch.load("trained_models/best_diffusion_latent.pth", map_location=device, weights_only=True))
 diff_model.eval()
 diffusion = LatentDiffusion(latent_dim=hidden_n, timesteps=1000, device=device)
 
 prior_net = DiffusionPriorNet(latent_dim=hidden_n, cond_dim=test_cond.shape[-1]).to(device)
-prior_net.load_state_dict(torch.load("trained_models/best_diffusion_prior.pth", map_location=device))
+prior_net.load_state_dict(torch.load("trained_models/best_diffusion_prior.pth", map_location=device, weights_only=True))
 prior_net.eval()
 
 # 加载表达式解码器

@@ -8,7 +8,7 @@ import os
 from dataset.grammar_alltogether import GCFG
 
 LEARNING_RATE = 1e-3
-EPOCHS = 50
+EPOCHS = 20
 BATCH_SIZE = 128
 DATA_DIR = 'dataset/iclr_final_truncated_fixed_powers.h5'
 CSV_PATH = 'dataset/tsoulos_dataset_1.csv'
@@ -17,7 +17,7 @@ SEED = 42
 productions = GCFG.productions()
 
 
-model = GVAE(seq_len=72, rule_dim=len(productions))
+model = GVAE(seq_len=72, input_feature_size=len(productions))
 model.load_state_dict(torch.load("./trained_models/best_gvae.pth", weights_only=True))
 model.eval()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

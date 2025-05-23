@@ -8,7 +8,7 @@ from dataset.grammar_alltogether import GCFG
 
 
 LEARNING_RATE=1e-3
-EPOCHS=50
+EPOCHS=20
 BATCH_SIZE=128
 DATA_DIR='dataset/iclr_final_truncated_fixed_powers.h5'
 SEED=42
